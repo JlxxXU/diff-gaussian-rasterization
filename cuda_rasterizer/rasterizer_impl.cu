@@ -8,7 +8,7 @@
  *
  * For inquiries contact  george.drettakis@inria.fr
  */
-
+ 
 #include "rasterizer_impl.h"
 #include <iostream>
 #include <fstream>
@@ -51,6 +51,8 @@ uint32_t getHigherMsb(uint32_t n)
 
 // Wrapper method to call auxiliary coarse frustum containment test.
 // Mark all Gaussians that pass it.
+//检查每个高斯点是否在视锥体内。
+//每个线程检查一个点是否可见，并将结果存储到 present 数组中
 __global__ void checkFrustum(int P,
 	const float* orig_points,
 	const float* viewmatrix,
@@ -67,6 +69,7 @@ __global__ void checkFrustum(int P,
 
 // Generates one key/value pair for all Gaussian / tile overlaps. 
 // Run once per Gaussian (1:N mapping).
+//对每个高斯点生成键值对，其中键是基于深度和所在瓦片的 ID，值是该高斯点的 ID
 __global__ void duplicateWithKeys(
 	int P,
 	const float2* points_xy,
@@ -113,6 +116,7 @@ __global__ void duplicateWithKeys(
 // Check keys to see if it is at the start/end of one tile's range in 
 // the full sorted list. If yes, write start/end of this tile. 
 // Run once per instanced (duplicated) Gaussian ID.
+//识别每个tile的工作范围
 __global__ void identifyTileRanges(int L, uint64_t* point_list_keys, uint2* ranges)
 {
 	auto idx = cg::this_grid().thread_rank();
@@ -195,6 +199,7 @@ CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chun
 
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
+//从几何状态到最终图像的渲染过程
 int CudaRasterizer::Rasterizer::forward(
 	std::function<char* (size_t)> geometryBuffer,
 	std::function<char* (size_t)> binningBuffer,
@@ -219,9 +224,10 @@ int CudaRasterizer::Rasterizer::forward(
 	float* out_depth,
 	int* radii)
 {
+	//计算焦距
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
-
+	
 	size_t chunk_size = required<GeometryState>(P);
 	char* chunkptr = geometryBuffer(chunk_size);
 	GeometryState geomState = GeometryState::fromChunk(chunkptr, P);
@@ -312,7 +318,7 @@ int CudaRasterizer::Rasterizer::forward(
 
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
-		identifyTileRanges << <(num_rendered + 255) / 256, 256 >> > (
+		 << <(num_rendered + 255) / 256, 256 >> > (
 			num_rendered,
 			binningState.point_list_keys,
 			imgState.ranges
@@ -321,6 +327,7 @@ int CudaRasterizer::Rasterizer::forward(
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
 	FORWARD::render(
+		//调用 FORWARD::render 进行最终的渲染操作
 		tile_grid, block,
 		imgState.ranges,
 		binningState.point_list,

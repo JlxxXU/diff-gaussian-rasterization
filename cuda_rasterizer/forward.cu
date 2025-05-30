@@ -22,14 +22,15 @@ __device__ glm::vec3 computeColorFromSH(int idx, int deg, int max_coeffs, const 
 	// The implementation is loosely based on code for 
 	// "Differentiable Point-Based Radiance Fields for 
 	// Efficient View Synthesis" by Zhang et al. (2022)
-	glm::vec3 pos = means[idx];
-	glm::vec3 dir = pos - campos;
-	dir = dir / glm::length(dir);
+	glm::vec3 pos = means[idx];//位置坐标
+	glm::vec3 dir = pos - campos;//相机到高斯点的方向向量
+	dir = dir / glm::length(dir);//归一化方向向量
 
 	glm::vec3* sh = ((glm::vec3*)shs) + idx * max_coeffs;
+	//球谐系数数组 shs 中取出当前点的球谐系数
 	glm::vec3 result = SH_C0 * sh[0];
 
-	if (deg > 0)
+	if (deg > 0)//.应该为0阶
 	{
 		float x = dir.x;
 		float y = dir.y;
@@ -259,7 +260,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 // block, each thread treats one pixel. Alternates between fetching 
 // and rasterizing data.
 template <uint32_t CHANNELS>
-__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
+__global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)//CUDA 内核启动的性能优化声明
 renderCUDA(
 	const uint2* __restrict__ ranges,
 	const uint32_t* __restrict__ point_list,
@@ -308,6 +309,7 @@ renderCUDA(
 
 	// Iterate over batches until all done or range is complete
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
+	//todo表示当下剩余的未处理的点数量
 	{
 		// End if entire block votes that it is done rasterizing
 		int num_done = __syncthreads_count(done);
@@ -329,26 +331,31 @@ renderCUDA(
 		// Iterate over current batch
 		for (int j = 0; !done && j < min(BLOCK_SIZE, toDo); j++)
 		{
+			//遍历当前线程块中从共享内存加载的高斯点数据，逐个处理它们
 			// Keep track of current position in range
 			contributor++;
 
 			// Resample using conic matrix (cf. "Surface 
 			// Splatting" by Zwicker et al., 2001)
-			float2 xy = collected_xy[j];
-			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
-			float4 con_o = collected_conic_opacity[j];
+			float2 xy = collected_xy[j];//当前高斯点在图像空间的坐标
+			float2 d = { xy.x - pixf.x, xy.y - pixf.y };//表示高斯点与像素的二维偏移量，用于计算距离
+			float4 con_o = collected_conic_opacity[j];//根据高斯点的2D共形矩阵（con_o）计算像素距离对高斯分布的权重
 			float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			if (power > 0.0f)
 				continue;
-
+			//power是高斯公式计算的指数部分，它用于控制该高斯点对当前像素的影响程度
+			//如果 power 大于零，说明当前像素与高斯点之间的距离过远，影响较小，因此跳过当前点
 			// Eq. (2) from 3D Gaussian splatting paper.
 			// Obtain alpha by multiplying with Gaussian opacity
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
 			float alpha = min(0.99f, con_o.w * exp(power));
-			if (alpha < 1.0f / 255.0f)
+			if (alpha < 1.0f / 255.0f)//计算不透明度（Alpha）,
+			//如果贡献值 alpha 太小,为无贡献，跳过
 				continue;
 			float test_T = T * (1 - alpha);
+			//如果透明度过低（低于 0.0001），则当前线程标记为 done，退出后续处理
+			//当前像素的剩余透明度
 			if (test_T < 0.0001f)
 			{
 				done = true;
@@ -356,6 +363,7 @@ renderCUDA(
 			}
 
 			// Eq. (3) from 3D Gaussian splatting paper.
+			//对于每个通道 C[ch]，根据当前点的颜色、透明度 alpha 和剩余透明度 T 加权叠加
 			for (int ch = 0; ch < CHANNELS; ch++)
 				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
 

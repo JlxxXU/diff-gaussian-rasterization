@@ -15,11 +15,11 @@ import os
 os.path.dirname(os.path.abspath(__file__))
 
 setup(
-    name="diff_gaussian_rasterization",
-    packages=['diff_gaussian_rasterization'],
+    name="diff_gaussian_rasterization",#name 和 packages 中的包名应当保持一致
+    packages=['diff_gaussian_rasterization'],#python包目录，应有init.py
     ext_modules=[
         CUDAExtension(
-            name="diff_gaussian_rasterization._C",
+            name="diff_gaussian_rasterization._C",#这里的name与前文的name一致，多加一个._C
             sources=[
             "cuda_rasterizer/rasterizer_impl.cu",
             "cuda_rasterizer/forward.cu",
